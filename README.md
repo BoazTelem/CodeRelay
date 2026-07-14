@@ -1,2 +1,2 @@
 # CodeRelay
-A local desktop app that coordinates Codex and Claude Code as configurable workers and auditors, automatically passing context, implementing changes, reviewing results, and iterating until completion.
+An open-source desktop app that connects Claude Code and Codex through your existing subscriptions, without separate API usage fees. They plan, implement, audit, and improve important coding tasks together until the work is complete.
