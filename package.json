@@ -1,0 +1,41 @@
+{
+  "name": "coderelay",
+  "version": "0.0.0-m2-proof",
+  "private": true,
+  "description": "Subscription-only, policy-enforced orchestration between the official Codex and Claude Code CLIs.",
+  "type": "module",
+  "engines": {
+    "node": "24.14.1"
+  },
+  "scripts": {
+    "build": "npm run build:typescript && npm run build:mcp",
+    "build:typescript": "tsc -p tsconfig.json",
+    "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/mcp-server.mjs --sourcemap --legal-comments=external",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm test",
+    "preprobe": "npm run build",
+    "probe": "tsx src/cli.ts probe",
+    "prototype": "tsx src/cli.ts prototype",
+    "premilestone2": "npm run build",
+    "milestone2": "tsx src/cli.ts milestone2",
+    "utility": "tsx src/orchestrator/utility-process.ts",
+    "audit:dependencies": "npm audit --audit-level=high",
+    "sbom": "cyclonedx-npm --output-file evidence/sbom.cdx.json --output-format JSON --spec-version 1.6"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.1",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "^6.0.0",
+    "@types/node": "^24.0.15",
+    "esbuild": "0.28.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

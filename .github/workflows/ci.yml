@@ -1,0 +1,43 @@
+name: Stub CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.14.1
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run prototype
+      - run: npm run sbom
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sbom-${{ matrix.os }}
+          path: evidence/sbom.cdx.json
+          if-no-files-found: error
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.14.1
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high

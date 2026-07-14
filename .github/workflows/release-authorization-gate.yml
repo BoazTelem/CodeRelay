@@ -1,0 +1,22 @@
+name: Release Authorization Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require recorded Milestone 2 GO
+        shell: bash
+        run: |
+          test -f docs/decisions/MILESTONE-2.md
+          grep -Eq '^Decision: GO$' docs/decisions/MILESTONE-2.md
+      - name: Explain boundary
+        run: echo "Authorization verified. The packaging/signing/release implementation is intentionally absent until a GO change is separately reviewed."
+
