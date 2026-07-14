@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+*.log
+*.tmp
+*.sqlite
+*.sqlite-*
+outputs/
+work/
+evidence/local/
+evidence/sbom.cdx.json
+.env
+.env.*
+!.env.example

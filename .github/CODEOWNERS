@@ -1,0 +1,6 @@
+* @maintainers
+/.github/workflows/ @maintainers
+/docs/ @maintainers
+/src/security/ @maintainers
+/src/orchestrator/ @maintainers
+

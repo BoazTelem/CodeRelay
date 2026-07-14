@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible CodeRelay defect without secrets or provider session data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, raw authentication output, session IDs, or proprietary source code. Use a private security advisory for vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: CodeRelay revision
+      placeholder: Commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows x64 proof environment, Stub-only CI, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps using redacted fixtures or stub providers where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, raw session identifiers, unredacted logs, and private source.
+          required: true
+

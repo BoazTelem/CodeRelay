@@ -1,0 +1,33 @@
+name: Feature proposal
+description: Propose work within an authorized milestone.
+title: "[Proposal]: "
+labels: [proposal]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Smallest useful scope and acceptance criteria
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Authorization
+      options:
+        - Milestone 0 capability/security proof
+        - Milestone 1 stub prototype
+        - Milestone 2 Windows evidence
+        - Post-GO idea (not currently authorized)
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Security, privacy, and workflow risks
+
