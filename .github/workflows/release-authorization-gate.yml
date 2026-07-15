@@ -11,7 +11,7 @@ jobs:
     environment: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Require recorded Milestone 2 GO
         shell: bash
         run: |
