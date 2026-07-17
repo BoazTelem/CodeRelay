@@ -4,11 +4,16 @@
   "private": true,
   "description": "Subscription-only, policy-enforced orchestration between the official Codex and Claude Code CLIs.",
   "type": "module",
+  "main": "dist/src/app/main.js",
   "engines": {
     "node": "24.14.1"
   },
   "scripts": {
     "build": "npm run build:typescript && npm run build:mcp",
+    "build:preload": "esbuild src/app/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/app/preload.cjs",
+    "build:renderer": "esbuild src/app/renderer/index.tsx --bundle --format=iife --jsx=automatic --outfile=dist/app/renderer/index.js && node -e \"require('fs').copyFileSync('src/app/renderer/index.html','dist/app/renderer/index.html')\"",
+    "build:app": "npm run build && npm run build:preload && npm run build:renderer",
+    "app": "npm run build:app && electron .",
     "build:typescript": "tsc -p tsconfig.json",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/mcp-server.mjs --sourcemap --legal-comments=external",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -33,7 +38,12 @@
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "^6.0.0",
     "@types/node": "^24.0.15",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "electron": "^43.1.1",
     "esbuild": "0.28.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

@@ -2,13 +2,47 @@
 import { createInterface } from "node:readline";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { HandoffPacket, UtilityRequest, UtilityResponse, TaskContract, WorkItemStage, SCHEMA_VERSION } from "../contracts/schemas.js";
 import { CodeRelayDatabase } from "../persistence/database.js";
 import { discoverExecutables, runCaptured } from "../platform/services.js";
 import { runMilestoneZeroProof } from "../proofs/milestone-zero.js";
 import { createStubFixture, runStubWorkflow } from "./stub-workflow.js";
+import { runRealHandoff } from "./real-handoff.js";
+import { inspectRepository } from "../repository/preflight.js";
 import { TrustedGit, captureGitSnapshot } from "../repository/git.js";
 import { sha256 } from "../security/redaction.js";
+import { normalizeClaudeAuthentication, normalizeCodexAuthentication } from "../providers/auth.js";
+
+const StartWorkItemPayload = z.object({
+  repository: z.string().min(1),
+  instruction: z.string().min(1),
+  objective: z.string().min(1).optional(),
+  allowedPaths: z.array(z.string().min(1)).min(1).default(["."]),
+  prohibitedPaths: z.array(z.string().min(1)).default([]),
+  validationCommand: z.object({ executable: z.string().min(1), args: z.array(z.string()).default([]) }).strict().optional(),
+  worker: z.enum(["codex", "claude"]).default("codex"),
+  confirmedUnpushed: z.boolean().default(false)
+}).strict();
+
+async function runnableExecutable(aliases: string[]): Promise<string | undefined> {
+  for (const candidate of await discoverExecutables(aliases)) {
+    const result = await runCaptured(candidate.path, ["--version"], { timeoutMs: 10_000 });
+    if (result.exitCode === 0) return candidate.path;
+  }
+  return undefined;
+}
+
+async function providerStatus(provider: "codex" | "claude"): Promise<Record<string, unknown>> {
+  const aliases = provider === "codex" ? ["codex", "codex.exe"] : ["claude", "claude.exe", "claude.cmd"];
+  const executable = await runnableExecutable(aliases);
+  if (!executable) return { provider, available: false, authState: "PROVIDER_UNAVAILABLE" };
+  const version = await runCaptured(executable, ["--version"], { timeoutMs: 10_000 });
+  const auth = await runCaptured(executable, provider === "codex" ? ["login", "status"] : ["auth", "status"], { timeoutMs: 15_000 });
+  const normalized = provider === "codex" ? normalizeCodexAuthentication(auth) : normalizeClaudeAuthentication(auth);
+  return { provider, available: true, version: version.stdout.trim() || version.stderr.trim(), authState: normalized.state };
+}
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -32,6 +66,7 @@ async function main(): Promise<void> {
   });
   database.pauseItemsWithUnreconciledProcesses();
   const gitExecutable = await workingGit();
+  const startErrors = new Map<string, string>();
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
   let shuttingDown = false;
 
@@ -104,12 +139,82 @@ async function main(): Promise<void> {
         ...(Array.isArray(inputPayload.auditorScenarios) ? { auditorScenarios: inputPayload.auditorScenarios as never[] } : {})
       });
     }
+    if (method === "provider_status") {
+      const [codex, claude] = await Promise.all([providerStatus("codex"), providerStatus("claude")]);
+      return { codex, claude };
+    }
+    if (method === "preflight_repository") {
+      const repository = payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).repository === "string"
+        ? (payload as Record<string, unknown>).repository as string : "";
+      if (!repository) throw new Error("repository is required");
+      return await inspectRepository(repository, gitExecutable);
+    }
+    if (method === "list_work_items") {
+      return { workItems: database.listWorkItems() };
+    }
+    if (method === "start_work_item") {
+      const start = StartWorkItemPayload.parse(payload ?? {});
+      const codex = await runnableExecutable(["codex", "codex.exe"]);
+      const claude = await runnableExecutable(["claude", "claude.exe", "claude.cmd"]);
+      if (!codex || !claude) throw new Error(`PROVIDER_UNAVAILABLE: ${!codex ? "codex" : ""}${!codex && !claude ? " and " : ""}${!claude ? "claude" : ""} not runnable on PATH`);
+      const preflight = await inspectRepository(start.repository, gitExecutable);
+      if (!preflight.clean) throw new Error("PRIMARY_CHECKOUT_DIRTY: commit, stash, or clean the repository before starting");
+      if (preflight.requiresUnpushedConfirmation && !start.confirmedUnpushed) {
+        throw new Error("UNPUSHED_BASE_REQUIRES_CONFIRMATION: the base commit is not pushed; confirm to proceed without pushing");
+      }
+      let validationCommands: { executable: string; args: string[]; cwd: string }[] = [];
+      if (start.validationCommand) {
+        const named = start.validationCommand.executable;
+        const resolved = path.isAbsolute(named) ? named : await runnableExecutable([named, `${named}.exe`, `${named}.cmd`]);
+        if (!resolved) throw new Error(`VALIDATION_EXECUTABLE_UNRESOLVED: ${named} is not runnable on PATH`);
+        validationCommands = [{ executable: resolved, args: start.validationCommand.args, cwd: "." }];
+      }
+      const workItemId = `wi_${randomUUID()}`;
+      const prohibited = [...new Set([".git", ...start.prohibitedPaths])];
+      void runRealHandoff({
+        database,
+        repository: preflight.canonicalRoot,
+        worktreesDirectory: path.join(dataDirectory, "worktrees"),
+        artifactsDirectory: path.join(dataDirectory, "artifacts", workItemId),
+        gitExecutable,
+        executables: { codex, claude },
+        worker: start.worker,
+        workItemId,
+        deterministicFixture: false,
+        confirmedUnpushed: start.confirmedUnpushed,
+        task: {
+          objective: start.objective ?? start.instruction.slice(0, 120),
+          userInstruction: start.instruction,
+          acceptanceCriteria: [
+            "The change implements the user instruction within the allowed paths",
+            ...(validationCommands.length > 0 ? ["Authoritative orchestrator validation passes"] : []),
+            "A fresh independent Auditor approves"
+          ],
+          allowedPaths: start.allowedPaths,
+          prohibitedPaths: prohibited,
+          validationCommands
+        }
+      }).then((result) => {
+        database.appendEvent(workItemId, "work_item.run_finished", { status: result.status, branch: result.branch, finalCommit: result.finalCommit });
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        startErrors.set(workItemId, message);
+        if (database.getWorkItem(workItemId)) {
+          database.appendEvent(workItemId, "work_item.run_error", { message });
+        }
+      });
+      return { workItemId, branch: `coderelay/${workItemId}`, worker: start.worker, repository: preflight.canonicalRoot };
+    }
     const object = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
     const workItemId = typeof object.workItemId === "string" ? object.workItemId : "";
     if (!workItemId) throw new Error("workItemId is required");
     const item = database.getWorkItem(workItemId);
-    if (!item) throw new Error(`Unknown Work Item ${workItemId}`);
-    if (method === "get_work_item") return { workItem: item, events: database.listEvents(workItemId) };
+    if (!item) {
+      const startError = startErrors.get(workItemId);
+      if (method === "get_work_item" && startError) return { workItem: null, events: [], startError };
+      throw new Error(`Unknown Work Item ${workItemId}`);
+    }
+    if (method === "get_work_item") return { workItem: item, events: database.listEvents(workItemId), startError: startErrors.get(workItemId) ?? null };
     const stage = WorkItemStage.parse(item.stage);
     if (method === "pause") {
       if (["COMPLETED", "ABORTED", "FAILED"].includes(String(item.status))) throw new Error(`Cannot pause terminal Work Item ${item.status}`);

@@ -475,7 +475,7 @@ export const UtilityRequest = z.object({
   requestId: z.string().uuid(),
   correlationId: z.string().uuid(),
   idempotencyKey: z.string().min(8),
-  method: z.enum(["health", "probe", "run_stub_workflow", "get_work_item", "pause", "resume", "intervene", "shutdown"]),
+  method: z.enum(["health", "probe", "provider_status", "preflight_repository", "run_stub_workflow", "start_work_item", "list_work_items", "get_work_item", "pause", "resume", "intervene", "shutdown"]),
   payload: z.unknown()
 }).strict();
 export type UtilityRequest = z.infer<typeof UtilityRequest>;

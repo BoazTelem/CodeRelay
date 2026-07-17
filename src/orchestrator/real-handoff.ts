@@ -18,6 +18,15 @@ import { runAuthoritativeValidation } from "./validation.js";
 import { STAGE_PROMPTS } from "./prompts.js";
 import { assessReadOnlyToolIsolation } from "./session-safety.js";
 
+export interface RealHandoffTask {
+  objective: string;
+  userInstruction: string;
+  acceptanceCriteria: string[];
+  allowedPaths: string[];
+  prohibitedPaths: string[];
+  validationCommands: { executable: string; args: string[]; cwd: string }[];
+}
+
 export interface RealHandoffOptions {
   database: CodeRelayDatabase;
   repository: string;
@@ -26,6 +35,30 @@ export interface RealHandoffOptions {
   gitExecutable: string;
   executables: { codex: string; claude: string };
   worker: "codex" | "claude";
+  workItemId?: string;
+  task?: RealHandoffTask;
+  deterministicFixture?: boolean;
+  confirmedUnpushed?: boolean;
+  maxIterations?: number;
+}
+
+function fixtureTask(worker: "codex" | "claude", auditor: "codex" | "claude"): RealHandoffTask {
+  return {
+    objective: `Prove a real ${worker} Worker to ${auditor} Auditor handoff`,
+    userInstruction: `Create src/result.txt containing a line that starts with "implemented by ${worker}"`,
+    acceptanceCriteria: ["Only src/result.txt changes", "Authoritative validation passes", `A fresh ${auditor} Auditor approves`],
+    allowedPaths: ["src"],
+    prohibitedPaths: [".git", "validate.mjs"],
+    validationCommands: [{ executable: process.execPath, args: ["validate.mjs"], cwd: "." }]
+  };
+}
+
+function pathPermitted(file: string, allowedPaths: readonly string[], prohibitedPaths: readonly string[]): boolean {
+  const matches = (candidate: string): boolean => {
+    const value = candidate.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+    return value === "." || file === value || file.startsWith(`${value}/`);
+  };
+  return allowedPaths.some(matches) && !prohibitedPaths.some(matches) && !file.split("/").some((part) => part.toLowerCase() === ".git");
 }
 
 export interface RealHandoffEvidence {
@@ -63,9 +96,11 @@ function changedPaths(status: string, untracked: readonly string[]): string[] {
 
 export async function runRealHandoff(options: RealHandoffOptions): Promise<RealHandoffEvidence> {
   const auditor = options.worker === "codex" ? "claude" : "codex";
+  const fixture = options.deterministicFixture ?? options.task === undefined;
+  const task = options.task ?? fixtureTask(options.worker, auditor);
   const preflight = await inspectRepository(options.repository, options.gitExecutable);
-  assertRepositoryMayStart(preflight);
-  const workItemId = `wi_m2_${randomUUID()}`;
+  assertRepositoryMayStart(preflight, options.confirmedUnpushed ?? false);
+  const workItemId = options.workItemId ?? (fixture ? `wi_m2_${randomUUID()}` : `wi_${randomUUID()}`);
   const branch = `coderelay/${workItemId}`;
   const worktree = path.join(options.worktreesDirectory, workItemId);
   await mkdir(options.worktreesDirectory, { recursive: true });
@@ -79,12 +114,12 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     workItemId,
     revision: 1,
     parentHash: null,
-    objective: `Prove a real ${options.worker} Worker to ${auditor} Auditor handoff`,
-    userInstruction: `Create src/result.txt containing a line that starts with "implemented by ${options.worker}"`,
-    acceptanceCriteria: ["Only src/result.txt changes", "Authoritative validation passes", `A fresh ${auditor} Auditor approves`],
-    allowedPaths: ["src"],
-    prohibitedPaths: [".git", "validate.mjs"],
-    validationCommands: [{ executable: process.execPath, args: ["validate.mjs"], cwd: "." }],
+    objective: task.objective,
+    userInstruction: task.userInstruction,
+    acceptanceCriteria: task.acceptanceCriteria,
+    allowedPaths: task.allowedPaths,
+    prohibitedPaths: task.prohibitedPaths,
+    validationCommands: task.validationCommands,
     risks: ["Real provider must remain confined to the broker"],
     humanAuthorizations: [],
     createdBy: "user",
@@ -93,13 +128,20 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   const approvedPlan = ImplementationPlan.parse({
     schemaVersion: SCHEMA_VERSION,
     version: 1,
-    behavior: [`Create src/result.txt beginning with "implemented by ${options.worker}"`],
-    approach: "Use only the Work-Item-scoped CodeRelay apply_patch broker tool, then rely on orchestrator validation and a fresh independent audit.",
+    behavior: [task.userInstruction],
+    approach: "Use only the Work-Item-scoped CodeRelay broker tools, then rely on orchestrator validation and a fresh independent audit.",
     reusedComponents: ["CodeRelay MCP broker", "authoritative validation runner", "trusted Git checkpoint service"],
     allowedPaths: contract.allowedPaths,
     prohibitedPaths: contract.prohibitedPaths,
-    steps: [{ id: "m2-fixture-change", description: "Create the single approved fixture file", paths: ["src/result.txt"], dependsOn: [] }],
-    tests: ["Orchestrator runs validate.mjs and records the complete ValidationResult"],
+    steps: [{
+      id: fixture ? "m2-fixture-change" : "user-task-change",
+      description: fixture ? "Create the single approved fixture file" : "Implement the user instruction within the approved paths",
+      paths: contract.allowedPaths,
+      dependsOn: []
+    }],
+    tests: contract.validationCommands.length > 0
+      ? ["Orchestrator runs the configured validation commands and records complete ValidationResults"]
+      : ["No deterministic validation command is configured; the fresh independent audit is the acceptance authority"],
     validationCommands: contract.validationCommands,
     risks: contract.risks,
     rollback: "Restore the isolated worktree to the previous trusted checkpoint; never mutate the primary checkout.",
@@ -108,7 +150,9 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   const approvedPlanAudit = PlanAudit.parse({
     schemaVersion: SCHEMA_VERSION,
     decision: "APPROVE",
-    summary: "The deterministic Milestone 2 fixture plan is feasible, path-scoped, independently validated, and reversible.",
+    summary: fixture
+      ? "The deterministic Milestone 2 fixture plan is feasible, path-scoped, independently validated, and reversible."
+      : "The user task plan is path-scoped, broker-confined, checkpointed, and reversible; the orchestrator remains the sole validation authority.",
     feasibilityFindings: [], assumptionFindings: [], scopeFindings: [], testFindings: [], safetyFindings: [], requiredRevisions: []
   });
   options.database.createWorkItem({
@@ -179,9 +223,10 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   const validationHashes: string[] = [];
   let findings: Finding[] = [];
   let brokerOnly = true;
-  while (iteration < 3) {
+  const maxIterations = options.maxIterations ?? 3;
+  while (iteration < maxIterations) {
     iteration += 1;
-    const leaseOwner = `m2_worker_${randomUUID()}`;
+    const leaseOwner = `worker_${randomUUID()}`;
     options.database.acquireWorkerLease(workItemId, leaseOwner, iteration === 1 ? "IMPLEMENTATION" : "REWORK", 10 * 60_000);
     persistAssignment(iteration === 1 ? "IMPLEMENTATION" : "REWORK", iteration);
     const worker = await workerAdapter.runTurn({
@@ -204,21 +249,35 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
       && !worker.eventSummary.toolNames.some((name) => /Bash|shell|unified_exec|(?:^|\/)Edit$|(?:^|\/)Write$/i.test(name));
     const postWorker = await captureGitSnapshot(git);
     const changed = changedPaths(postWorker.status, postWorker.untrackedFiles);
-    if (postWorker.head !== checkpoint || postWorker.branch !== branch || postWorker.indexDiff !== "" || changed.some((file) => file !== "src/result.txt") || !brokerOnly) {
+    const scopeViolated = fixture
+      ? changed.some((file) => file !== "src/result.txt")
+      : changed.some((file) => !pathPermitted(file, contract.allowedPaths, contract.prohibitedPaths));
+    if (postWorker.head !== checkpoint || postWorker.branch !== branch || postWorker.indexDiff !== "" || scopeViolated || !brokerOnly) {
       await restoreIsolatedCheckpoint(git, preflight.canonicalRoot, worktree, checkpoint, branch);
       options.database.releaseWorkerLease(workItemId, leaseOwner);
       options.database.transition(workItemId, "IMPLEMENTATION", "BLOCKED", "scope.violation", { iteration, changedPathHashes: changed.map(sha256), brokerOnly });
       return evidence("BLOCKED", checkpoint, iteration, workerSessions, auditorSessions, checkpoints, validationHashes, findings, brokerOnly);
     }
-    const implemented = await readFile(path.join(worktree, "src", "result.txt"), "utf8").catch(() => "");
-    if (!implemented.startsWith(`implemented by ${options.worker}`)) {
+    if (fixture) {
+      const implemented = await readFile(path.join(worktree, "src", "result.txt"), "utf8").catch(() => "");
+      if (!implemented.startsWith(`implemented by ${options.worker}`)) {
+        options.database.releaseWorkerLease(workItemId, leaseOwner);
+        findings = [{
+          id: `acceptance_${iteration}`, priority: "P1", origin: "INTRODUCED_BY_LATEST_CHANGE",
+          title: "Fixture content does not satisfy the deterministic acceptance criterion",
+          evidence: sha256(implemented), blocking: true, status: "open"
+        }];
+        options.database.transition(workItemId, "REWORK", "ACTIVE", "acceptance.failed", { iteration, evidenceHash: sha256(implemented) });
+        continue;
+      }
+    } else if (changed.length === 0) {
       options.database.releaseWorkerLease(workItemId, leaseOwner);
       findings = [{
         id: `acceptance_${iteration}`, priority: "P1", origin: "INTRODUCED_BY_LATEST_CHANGE",
-        title: "Fixture content does not satisfy the deterministic acceptance criterion",
-        evidence: sha256(implemented), blocking: true, status: "open"
+        title: "Worker turn produced no changes in the isolated worktree",
+        evidence: `iteration:${iteration}`, blocking: true, status: "open"
       }];
-      options.database.transition(workItemId, "REWORK", "ACTIVE", "acceptance.failed", { iteration, evidenceHash: sha256(implemented) });
+      options.database.transition(workItemId, "REWORK", "ACTIVE", "acceptance.failed", { iteration, evidenceHash: sha256("no-changes") });
       continue;
     }
     persistAssignment("VALIDATION", iteration);
@@ -231,7 +290,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
       continue;
     }
     await git.run(["add", "--all"]);
-    await git.run(["commit", "-m", `CodeRelay Milestone 2 checkpoint ${iteration}`]);
+    await git.run(["commit", "-m", `CodeRelay checkpoint ${iteration}: ${task.objective.slice(0, 72)}`]);
     checkpoint = (await git.run(["rev-parse", "HEAD"])).trim();
     checkpoints.push(checkpoint);
     options.database.saveCheckpoint(workItemId, "VALIDATION", checkpoint, await captureGitSnapshot(git));
@@ -243,12 +302,12 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
       from: { provider: options.worker, role: "WORKER" }, to: { provider: auditor, role: "AUDITOR" },
       fromStage: iteration === 1 ? "IMPLEMENTATION" : "REWORK", toStage: "REVIEW", iteration,
       summary: worker.output.summary, taskContractVersion: 1, planVersion: 1,
-      decisions: ["Deterministic fixture plan approved", "Orchestrator is the sole validation authority"],
-      evidenceRefs: validationHashes, changedFiles: ["src/result.txt"], diffHash: sha256(diff),
+      decisions: [fixture ? "Deterministic fixture plan approved" : "User task plan approved", "Orchestrator is the sole validation authority"],
+      evidenceRefs: validationHashes, changedFiles: changed, diffHash: sha256(diff),
       validationRefs: validationHashes, findings, resolvedFindingIds: worker.output.resolvedFindingIds,
       unresolvedFindingIds: findings.filter((finding) => finding.status === "open").map((finding) => finding.id),
       assumptions: worker.output.assumptions, blockers: worker.output.blockers,
-      recommendedNextAction: "Perform fresh independent review", contextBriefRefs: ["m2:fixture"], createdAt: new Date().toISOString()
+      recommendedNextAction: "Perform fresh independent review", contextBriefRefs: [fixture ? "m2:fixture" : "user:task"], createdAt: new Date().toISOString()
     });
     options.database.saveHandoff(packet);
     options.database.transition(workItemId, "REVIEW", "ACTIVE", "handoff.created", { iteration, diffHash: packet.diffHash });

@@ -405,6 +405,11 @@ export class CodeRelayDatabase {
     const row = this.connection.prepare("SELECT * FROM work_items WHERE id = ?").get(id) as Record<string, unknown> | undefined;
     return row;
   }
+
+  listWorkItems(limit = 100): Array<Record<string, unknown>> {
+    return this.connection.prepare("SELECT id, title, primary_root, branch, stage, status, iteration, created_at, updated_at FROM work_items ORDER BY created_at DESC, rowid DESC LIMIT ?")
+      .all(limit) as Array<Record<string, unknown>>;
+  }
 }
 
 async function retainLatestBackups(directory: string, count: number): Promise<void> {
