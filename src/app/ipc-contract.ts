@@ -19,6 +19,7 @@ export const StartWorkItemArgs = z.object({
   repository: z.string().min(1),
   instruction: z.string().min(1),
   objective: z.string().min(1).optional(),
+  baseBranch: z.string().min(1).optional(),
   allowedPaths: z.array(z.string().min(1)).min(1),
   prohibitedPaths: z.array(z.string().min(1)).default([]),
   validationCommand: z.object({ executable: z.string().min(1), args: z.array(z.string()) }).strict().optional(),

@@ -146,6 +146,7 @@ export function App(): JSX.Element {
   const [allowedPaths, setAllowedPaths] = useState(".");
   const [validationCommand, setValidationCommand] = useState("");
   const [worker, setWorker] = useState<"codex" | "claude">("codex");
+  const [baseBranch, setBaseBranch] = useState("");
   const [confirmedUnpushed, setConfirmedUnpushed] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
   const [startError, setStartError] = useState("");
@@ -241,7 +242,9 @@ export function App(): JSX.Element {
     setConfirmedUnpushed(false);
     setPreflightBusy(true);
     try {
-      setPreflight(await window.coderelay.preflight(picked));
+      const result = await window.coderelay.preflight(picked);
+      setPreflight(result);
+      setBaseBranch(result.currentBranch || result.localBranches[0]?.name || "");
     } catch (error) {
       setPreflightError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -269,6 +272,7 @@ export function App(): JSX.Element {
         allowedPaths: paths.length > 0 ? paths : ["."],
         worker,
         confirmedUnpushed,
+        ...(baseBranch ? { baseBranch } : {}),
         ...(validationTokens.length > 0
           ? { validationCommand: { executable: validationTokens[0]!, args: validationTokens.slice(1) } }
           : {})
@@ -390,8 +394,18 @@ export function App(): JSX.Element {
               {preflight && (
                 <div style={{ marginTop: 14 }}>
                   <dl className="kv">
-                    <dt>Branch</dt><dd>{preflight.currentBranch || "(detached)"}</dd>
-                    <dt>HEAD</dt><dd>{preflight.head.slice(0, 12)}</dd>
+                    <dt>Base branch</dt>
+                    <dd>
+                      <select className="branch-select" value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)}>
+                        {preflight.localBranches.map((candidate) => (
+                          <option key={candidate.name} value={candidate.name}>
+                            {candidate.name}{candidate.isCurrent ? "  (current)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </dd>
+                    <dt>Base commit</dt>
+                    <dd>{(preflight.localBranches.find((candidate) => candidate.name === baseBranch)?.head ?? preflight.head).slice(0, 12)}</dd>
                     <dt>State</dt>
                     <dd>
                       {preflight.clean

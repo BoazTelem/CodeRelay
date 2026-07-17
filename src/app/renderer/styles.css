@@ -179,6 +179,18 @@ button.linkish:disabled { color: var(--text-faint); cursor: default; text-decora
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 5px; }
 .field .hint { font-weight: 400; color: var(--text-faint); }
 
+select.branch-select {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  max-width: 320px;
+}
+select.branch-select:focus { outline: none; border-color: var(--accent); }
+
 input[type="text"], textarea {
   width: 100%;
   background: var(--bg-inset);

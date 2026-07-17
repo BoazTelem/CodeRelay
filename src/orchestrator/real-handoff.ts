@@ -37,6 +37,7 @@ export interface RealHandoffOptions {
   worker: "codex" | "claude";
   workItemId?: string;
   task?: RealHandoffTask;
+  baseBranch?: string;
   deterministicFixture?: boolean;
   confirmedUnpushed?: boolean;
   maxIterations?: number;
@@ -107,7 +108,14 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   await mkdir(options.artifactsDirectory, { recursive: true });
   const primaryGit = new TrustedGit({ executable: options.gitExecutable, repository: preflight.canonicalRoot });
   const primaryBefore = await captureGitSnapshot(primaryGit);
-  await createIsolatedWorktree(primaryGit, worktree, branch, preflight.head);
+  let baseCommit = preflight.head;
+  if (options.baseBranch && options.baseBranch !== preflight.currentBranch) {
+    if (!preflight.localBranches.some((candidate) => candidate.name === options.baseBranch)) {
+      throw new Error(`BASE_BRANCH_UNKNOWN: ${options.baseBranch} is not a local branch of this repository`);
+    }
+    baseCommit = (await primaryGit.run(["rev-parse", `refs/heads/${options.baseBranch}`])).trim();
+  }
+  await createIsolatedWorktree(primaryGit, worktree, branch, baseCommit);
   const git = new TrustedGit({ executable: options.gitExecutable, repository: worktree });
   const contract = TaskContract.parse({
     schemaVersion: SCHEMA_VERSION,
@@ -157,10 +165,10 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   });
   options.database.createWorkItem({
     id: workItemId, title: contract.objective, repositoryRootHash: preflight.rootHash,
-    primaryRoot: preflight.canonicalRoot, worktreeRoot: worktree, baseCommit: preflight.head,
+    primaryRoot: preflight.canonicalRoot, worktreeRoot: worktree, baseCommit,
     branch, stage: "IMPLEMENTATION", status: "ACTIVE", contract
   });
-  options.database.saveCheckpoint(workItemId, "IMPLEMENTATION", preflight.head, await captureGitSnapshot(git));
+  options.database.saveCheckpoint(workItemId, "IMPLEMENTATION", baseCommit, await captureGitSnapshot(git));
 
   const restrictedPath = [...new Set([
     path.dirname(options.executables.codex), path.dirname(options.executables.claude), path.dirname(options.gitExecutable), path.dirname(process.execPath),
@@ -216,12 +224,12 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     const authentication = await adapter.authenticate();
     if (authentication.state !== "SUBSCRIPTION_VERIFIED") {
       options.database.transition(workItemId, "IMPLEMENTATION", "PAUSED", "provider.authentication_failed", { provider: adapter.provider, state: authentication.state });
-      return evidence("PAUSED", preflight.head, 0, [], [], [], [], [], false);
+      return evidence("PAUSED", baseCommit, 0, [], [], [], [], [], false);
     }
   }
 
   let iteration = 0;
-  let checkpoint = preflight.head;
+  let checkpoint = baseCommit;
   const checkpoints: string[] = [checkpoint];
   const workerSessions: string[] = [];
   const auditorSessions: string[] = [];
@@ -301,7 +309,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     options.database.saveCheckpoint(workItemId, "VALIDATION", checkpoint, await captureGitSnapshot(git));
     options.database.releaseWorkerLease(workItemId, leaseOwner);
 
-    const diff = await git.run(["diff", `${preflight.head}..${checkpoint}`, "--binary"]);
+    const diff = await git.run(["diff", `${baseCommit}..${checkpoint}`, "--binary"]);
     const packet = HandoffPacket.parse({
       schemaVersion: SCHEMA_VERSION, workItemId,
       from: { provider: options.worker, role: "WORKER" }, to: { provider: auditor, role: "AUDITOR" },
@@ -326,7 +334,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
       primaryCheckoutMustRemainUntouched: true
     };
     const gitEvidence = {
-      baseCommit: preflight.head,
+      baseCommit,
       checkpointCommit: checkpoint,
       branch,
       indexClean: (await git.run(["diff", "--cached", "--quiet"]).then(() => true, () => false)),
@@ -403,7 +411,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   ): RealHandoffEvidence {
     return {
       schemaVersion: SCHEMA_VERSION, workItemId, direction: `${options.worker}-to-${auditor}`, status,
-      baseCommit: preflight.head, finalCommit, branch, iterations,
+      baseCommit, finalCommit, branch, iterations,
       workerSessionHashes: rawWorkerSessions.map(sha256), auditorSessionHashes: rawAuditorSessions.map(sha256),
       checkpoints: checkpointValues, validationHashes: validationValues, findings: findingValues,
       primaryCheckoutUntouched, brokerOnly: brokerOnlyValue, prohibitedExternalActions: "none"

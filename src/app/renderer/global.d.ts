@@ -30,6 +30,7 @@ export interface PreflightSummary {
   currentBranch: string;
   head: string;
   clean: boolean;
+  localBranches: Array<{ name: string; head: string; isCurrent: boolean }>;
   dirtyTracked: string[];
   staged: string[];
   untracked: string[];
@@ -67,6 +68,7 @@ export interface StartWorkItemPayload {
   repository: string;
   instruction: string;
   objective?: string;
+  baseBranch?: string;
   allowedPaths: string[];
   prohibitedPaths?: string[];
   validationCommand?: { executable: string; args: string[] };

@@ -16,6 +16,7 @@ export interface RepositoryPreflight {
   untracked: string[];
   unpushedCommits: number | null;
   upstream: string | null;
+  localBranches: Array<{ name: string; head: string; isCurrent: boolean }>;
   worktrees: Array<{ pathHash: string; head: string; branch: string | null }>;
   codeRelayBranches: string[];
   submoduleStatus: string[];
@@ -91,6 +92,13 @@ export async function inspectRepository(repository: string, gitExecutable: strin
     const count = await git.run(["rev-list", "--count", `${upstream}..HEAD`]);
     unpushedCommits = Number(count.trim());
   }
+  const branchListRaw = await git.run(["for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads"]);
+  const currentBranchName = branchRaw.trim();
+  const localBranches = branchListRaw.split(/\r?\n/).filter(Boolean).map((line) => {
+    const separator = line.lastIndexOf(" ");
+    const name = line.slice(0, separator);
+    return { name, head: line.slice(separator + 1), isCurrent: name === currentBranchName };
+  }).sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || a.name.localeCompare(b.name));
   const status = parseStatus(statusRaw);
   const submoduleStatus = submoduleRaw.split(/\r?\n/).filter(Boolean);
   const dirtySubmodule = submoduleStatus.some((line) => /^[+U-]/.test(line));
@@ -106,6 +114,7 @@ export async function inspectRepository(repository: string, gitExecutable: strin
     ...status,
     unpushedCommits,
     upstream,
+    localBranches,
     worktrees: parseWorktrees(worktreeRaw),
     codeRelayBranches: codeRelayRaw.split(/\r?\n/).filter(Boolean).sort(),
     submoduleStatus,

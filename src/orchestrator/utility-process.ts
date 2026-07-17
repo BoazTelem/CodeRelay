@@ -20,6 +20,7 @@ const StartWorkItemPayload = z.object({
   repository: z.string().min(1),
   instruction: z.string().min(1),
   objective: z.string().min(1).optional(),
+  baseBranch: z.string().min(1).optional(),
   allowedPaths: z.array(z.string().min(1)).min(1).default(["."]),
   prohibitedPaths: z.array(z.string().min(1)).default([]),
   validationCommand: z.object({ executable: z.string().min(1), args: z.array(z.string()).default([]) }).strict().optional(),
@@ -193,6 +194,7 @@ async function main(): Promise<void> {
         executables: { codex, claude },
         worker: start.worker,
         workItemId,
+        ...(start.baseBranch ? { baseBranch: start.baseBranch } : {}),
         deterministicFixture: false,
         confirmedUnpushed: start.confirmedUnpushed,
         task: {
