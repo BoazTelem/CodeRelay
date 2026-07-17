@@ -25,9 +25,14 @@ export interface RealProviderAdapterOptions {
   executable: string;
   environment: NodeJS.ProcessEnv;
   artifactDirectory: string;
-  mcpServer?: { command: string; args: string[] };
+  mcpServer?: { command: string; args: string[]; environment?: Record<string, string> };
   processObserver?: ProcessObserver;
   usageObserver?: (usage: ProviderUsage) => void;
+}
+
+function tomlStringTable(value: Record<string, string>): string {
+  const entries = Object.entries(value).map(([key, entry]) => `${key} = ${JSON.stringify(entry)}`);
+  return `{ ${entries.join(", ")} }`;
 }
 
 interface ProcessOutput {
@@ -204,6 +209,7 @@ export class RealProviderAdapter implements ProviderAdapter {
       const overrides = this.options.mcpServer ? [
         "-c", `mcp_servers.coderelay.command=${JSON.stringify(this.options.mcpServer.command)}`,
         "-c", `mcp_servers.coderelay.args=${JSON.stringify(this.options.mcpServer.args)}`,
+        ...(this.options.mcpServer.environment ? ["-c", `mcp_servers.coderelay.env=${tomlStringTable(this.options.mcpServer.environment)}`] : []),
         "-c", "mcp_servers.coderelay.required=true",
         "-c", `mcp_servers.coderelay.enabled_tools=${JSON.stringify(["read_file", "list_files", "search", "apply_patch", "run_command"])}`,
         "-c", `mcp_servers.coderelay.default_tools_approval_mode=${JSON.stringify("approve")}`
@@ -225,7 +231,13 @@ export class RealProviderAdapter implements ProviderAdapter {
     } else {
       const mcpPath = path.join(await this.runtimeDirectory(), `${turnId}.mcp.json`);
       const mcpServers = this.options.mcpServer
-        ? { coderelay: { command: this.options.mcpServer.command, args: this.options.mcpServer.args } }
+        ? {
+          coderelay: {
+            command: this.options.mcpServer.command,
+            args: this.options.mcpServer.args,
+            ...(this.options.mcpServer.environment ? { env: this.options.mcpServer.environment } : {})
+          }
+        }
         : {};
       await writeFile(mcpPath, JSON.stringify({ mcpServers }), "utf8");
       const redactedServers = this.options.mcpServer

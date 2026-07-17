@@ -1,6 +1,6 @@
 {
   "name": "coderelay",
-  "version": "0.0.0-m2-proof",
+  "version": "0.1.0",
   "private": true,
   "description": "Subscription-only, policy-enforced orchestration between the official Codex and Claude Code CLIs.",
   "type": "module",
@@ -28,7 +28,30 @@
     "milestone2": "tsx src/cli.ts milestone2",
     "utility": "tsx src/orchestrator/utility-process.ts",
     "audit:dependencies": "npm audit --audit-level=high",
-    "sbom": "cyclonedx-npm --output-file evidence/sbom.cdx.json --output-format JSON --spec-version 1.6"
+    "sbom": "cyclonedx-npm --output-file evidence/sbom.cdx.json --output-format JSON --spec-version 1.6",
+    "installer": "npm run build:app && electron-builder --win nsis --publish never"
+  },
+  "build": {
+    "appId": "dev.coderelay.desktop",
+    "productName": "CodeRelay",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "CodeRelay-Setup-${version}.${ext}"
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.1",
@@ -41,6 +64,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "0.28.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

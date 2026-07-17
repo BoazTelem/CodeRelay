@@ -200,7 +200,7 @@ async function activeProviderProof(
     executable,
     environment: safe.values,
     artifactDirectory: path.join(base, "artifacts", provider),
-    mcpServer: { command: server.command, args: [...server.args, "--config", brokerPath, "--nonce", nonce] }
+    mcpServer: { command: server.command, args: [...server.args, "--config", brokerPath, "--nonce", nonce], environment: server.environment }
   });
   const request = {
     workItemId: `m0-${provider}`,

@@ -200,7 +200,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     executable: options.executables[options.worker],
     environment: safe.values,
     artifactDirectory: path.join(options.artifactsDirectory, workItemId, "worker"),
-    mcpServer: { command: server.command, args: [...server.args, "--config", brokerPath, "--nonce", nonce] },
+    mcpServer: { command: server.command, args: [...server.args, "--config", brokerPath, "--nonce", nonce], environment: server.environment },
     processObserver,
     usageObserver
   });
