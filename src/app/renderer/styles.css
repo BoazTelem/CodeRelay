@@ -35,10 +35,19 @@ body {
   width: 300px;
   min-width: 300px;
   background: var(--bg-inset);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
+
+.splitter {
+  width: 5px;
+  min-width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.splitter:hover, .splitter:active { background: var(--accent); }
 
 .brand {
   padding: 18px 20px 14px;
@@ -90,23 +99,24 @@ body {
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
 .badge.dim { background: rgba(147, 161, 176, 0.12); color: var(--text-dim); }
 
-.usage-block { padding: 0 0 8px 74px; }
-.usage-line { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.usage-block { display: flex; flex-direction: column; gap: 2px; padding: 0 0 6px 74px; }
+.usage-line { display: flex; align-items: center; gap: 8px; cursor: default; }
 .usage-label { color: var(--text-faint); font-size: 11px; width: 42px; }
 .usage-bar {
   flex: 1;
-  height: 5px;
+  height: 4px;
   background: var(--bg-raised);
-  border-radius: 3px;
+  border-radius: 2px;
   overflow: hidden;
 }
-.usage-fill { display: block; height: 100%; border-radius: 3px; }
+.usage-fill { display: block; height: 100%; border-radius: 2px; }
 .usage-fill.good { background: var(--good); }
 .usage-fill.warn { background: var(--warn); }
 .usage-fill.bad { background: var(--bad); }
-.usage-percent { color: var(--text-dim); font-size: 11px; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
-.usage-note { color: var(--text-faint); font-size: 11px; }
-.usage-meta { display: flex; gap: 10px; color: var(--text-faint); font-size: 10px; padding-top: 3px; flex-wrap: wrap; }
+.usage-percent { color: var(--text-dim); font-size: 11px; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-note { color: var(--text-faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usage-note.ok { color: var(--good); }
+.usage-note.attention { color: var(--warn); }
 button.linkish {
   background: none;
   border: none;
@@ -237,7 +247,10 @@ button.danger { background: var(--bad-soft); color: var(--bad); }
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: 8px;
-  max-height: 320px;
+  height: 280px;
+  min-height: 120px;
+  max-height: 70vh;
+  resize: vertical;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 12px;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { JSX } from "react";
+import type { JSX, MouseEvent as ReactMouseEvent } from "react";
 import type { PreflightSummary, ProviderStatusEntry, ProviderUsage, WorkItemDetail, WorkItemRow } from "./global.js";
 
 type ProviderPair = { codex: ProviderStatusEntry; claude: ProviderStatusEntry };
@@ -34,17 +34,26 @@ function epochLabel(seconds: number): string {
   return sameDay ? time : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
-function usedBarClass(percent: number): string {
-  if (percent >= 90) return "bad";
-  if (percent >= 70) return "warn";
+function remainingBarClass(remaining: number): string {
+  if (remaining <= 10) return "bad";
+  if (remaining <= 30) return "warn";
   return "good";
+}
+
+function usageTooltip(usage: ProviderUsage, resetsAt?: number | null): string {
+  const parts: string[] = [];
+  if (resetsAt) parts.push(`Resets ${epochLabel(resetsAt)}`);
+  if (usage.planType) parts.push(`${usage.planType} plan`);
+  if (usage.creditsBalance) parts.push(`$${Number(usage.creditsBalance).toFixed(2)} credits`);
+  parts.push(`As of ${timeOf(usage.capturedAt)}`);
+  return parts.join(" · ");
 }
 
 function UsageLines({ usage, onProbe, probing }: { usage: ProviderUsage | null | undefined; onProbe?: () => void; probing?: boolean }): JSX.Element {
   if (!usage) {
     return (
       <div className="usage-block">
-        <span className="usage-note">No usage data yet</span>
+        <span className="usage-note">no usage data</span>
         {onProbe && (
           <button className="linkish" onClick={onProbe} disabled={probing} title="Runs one minimal Claude request to read the current limit status">
             {probing ? "checking…" : "check now"}
@@ -55,32 +64,30 @@ function UsageLines({ usage, onProbe, probing }: { usage: ProviderUsage | null |
   }
   return (
     <div className="usage-block">
-      {usage.windows.map((window) => (
-        <div className="usage-line" key={window.label} title={window.resetsAt ? `Resets ${epochLabel(window.resetsAt)}` : undefined}>
-          <span className="usage-label">{window.label}</span>
-          <span className="usage-bar"><span className={`usage-fill ${usedBarClass(window.usedPercent)}`} style={{ width: `${Math.min(100, window.usedPercent)}%` }} /></span>
-          <span className="usage-percent">{Math.round(window.usedPercent)}%</span>
-        </div>
-      ))}
+      {usage.windows.map((window) => {
+        const remaining = Math.max(0, Math.round(100 - window.usedPercent));
+        return (
+          <div className="usage-line" key={window.label} title={usageTooltip(usage, window.resetsAt)}>
+            <span className="usage-label">{window.label}</span>
+            <span className="usage-bar"><span className={`usage-fill ${remainingBarClass(remaining)}`} style={{ width: `${remaining}%` }} /></span>
+            <span className="usage-percent">{remaining}% left</span>
+          </div>
+        );
+      })}
       {usage.windows.length === 0 && (
-        <div className="usage-line">
+        <div className="usage-line" title={usageTooltip(usage, usage.resetsAt ?? null)}>
           <span className="usage-label">{usage.limitType === "five_hour" ? "5h" : usage.limitType === "seven_day" ? "weekly" : (usage.limitType ?? "limits")}</span>
-          <span className={`badge ${usage.status === "allowed" && !usage.isUsingOverage ? "good" : usage.status === "allowed" ? "warn" : "bad"}`}>
-            {usage.status === "allowed" ? (usage.isUsingOverage ? "using overage" : "OK") : (usage.status ?? "unknown")}
+          <span className={`usage-note ${usage.status === "allowed" && !usage.isUsingOverage ? "ok" : "attention"}`}>
+            {usage.status === "allowed" ? (usage.isUsingOverage ? "overage" : "OK") : (usage.status ?? "unknown")}
+            {usage.resetsAt !== undefined && ` · resets ${epochLabel(usage.resetsAt)}`}
           </span>
-          {usage.resetsAt !== undefined && <span className="usage-note">resets {epochLabel(usage.resetsAt)}</span>}
+          {onProbe && (
+            <button className="linkish" onClick={onProbe} disabled={probing} title="Runs one minimal Claude request to refresh the limit status">
+              {probing ? "…" : "↻"}
+            </button>
+          )}
         </div>
       )}
-      <div className="usage-meta">
-        {usage.planType && <span>{usage.planType} plan</span>}
-        {usage.creditsBalance && <span>${Number(usage.creditsBalance).toFixed(2)} credits</span>}
-        <span>as of {timeOf(usage.capturedAt)}</span>
-        {onProbe && (
-          <button className="linkish" onClick={onProbe} disabled={probing} title="Runs one minimal Claude request to refresh the limit status">
-            {probing ? "checking…" : "refresh"}
-          </button>
-        )}
-      </div>
     </div>
   );
 }
@@ -89,9 +96,9 @@ function usageHint(entry: ProviderStatusEntry | undefined): string {
   const usage = entry?.usage;
   if (!usage) return "";
   if (usage.windows.length > 0) {
-    return usage.windows.map((window) => `${window.label} ${Math.round(window.usedPercent)}% used`).join(" · ");
+    return usage.windows.map((window) => `${window.label} ${Math.max(0, Math.round(100 - window.usedPercent))}% left`).join(" · ");
   }
-  if (usage.status === "allowed") return usage.isUsingOverage ? "within limits (overage)" : "within limits";
+  if (usage.status === "allowed") return usage.isUsingOverage ? "available (overage)" : "available";
   return usage.status ? `limit: ${usage.status}` : "";
 }
 
@@ -148,7 +155,29 @@ export function App(): JSX.Element {
   const [actionError, setActionError] = useState("");
   const [intervention, setIntervention] = useState("");
   const [probingClaude, setProbingClaude] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = Number(localStorage.getItem("coderelay.sidebarWidth"));
+    return Number.isFinite(stored) && stored >= 220 && stored <= 560 ? stored : 300;
+  });
   const eventsEnd = useRef<HTMLDivElement>(null);
+
+  const beginSidebarResize = (event: ReactMouseEvent): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (move: MouseEvent): void => {
+      const next = Math.min(560, Math.max(220, startWidth + move.clientX - startX));
+      setSidebarWidth(next);
+    };
+    const onUp = (up: MouseEvent): void => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const final = Math.min(560, Math.max(220, startWidth + up.clientX - startX));
+      localStorage.setItem("coderelay.sidebarWidth", String(final));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   const refreshProviders = useCallback(() => {
     setProvidersBusy(true);
@@ -276,7 +305,7 @@ export function App(): JSX.Element {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: sidebarWidth, minWidth: sidebarWidth }}>
         <div className="brand">
           <h1>Code<span>Relay</span></h1>
           <p>Codex ⇄ Claude orchestrated handoffs</p>
@@ -334,6 +363,8 @@ export function App(): JSX.Element {
           ))}
         </div>
       </aside>
+
+      <div className="splitter" onMouseDown={beginSidebarResize} title="Drag to resize" />
 
       <main className="main">
         {!selectedId && (
