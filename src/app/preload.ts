@@ -3,6 +3,7 @@ import { CHANNELS } from "./ipc-contract.js";
 
 const api = {
   providerStatus: () => ipcRenderer.invoke(CHANNELS.providerStatus),
+  probeClaudeUsage: () => ipcRenderer.invoke(CHANNELS.probeClaudeUsage),
   pickRepository: () => ipcRenderer.invoke(CHANNELS.pickRepository),
   preflight: (repository: string) => ipcRenderer.invoke(CHANNELS.preflight, { repository }),
   startWorkItem: (payload: unknown) => ipcRenderer.invoke(CHANNELS.startWorkItem, payload),

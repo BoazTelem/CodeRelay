@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const CHANNELS = {
   providerStatus: "coderelay:provider-status",
+  probeClaudeUsage: "coderelay:probe-claude-usage",
   pickRepository: "coderelay:pick-repository",
   preflight: "coderelay:preflight",
   startWorkItem: "coderelay:start-work-item",

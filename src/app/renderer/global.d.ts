@@ -1,8 +1,28 @@
+export interface UsageWindow {
+  label: string;
+  usedPercent: number;
+  resetsAt: number | null;
+}
+
+export interface ProviderUsage {
+  provider: "codex" | "claude";
+  capturedAt: string;
+  source: "session-log" | "run-event" | "probe";
+  windows: UsageWindow[];
+  status?: string;
+  limitType?: string;
+  resetsAt?: number;
+  isUsingOverage?: boolean;
+  planType?: string;
+  creditsBalance?: string;
+}
+
 export interface ProviderStatusEntry {
   provider: "codex" | "claude";
   available: boolean;
   version?: string;
   authState: string;
+  usage?: ProviderUsage | null;
 }
 
 export interface PreflightSummary {
@@ -56,6 +76,7 @@ export interface StartWorkItemPayload {
 
 export interface CodeRelayApi {
   providerStatus(): Promise<{ codex: ProviderStatusEntry; claude: ProviderStatusEntry }>;
+  probeClaudeUsage(): Promise<{ usage: ProviderUsage }>;
   pickRepository(): Promise<string | null>;
   preflight(repository: string): Promise<PreflightSummary>;
   startWorkItem(payload: StartWorkItemPayload): Promise<{ workItemId: string; branch: string; worker: string; repository: string }>;

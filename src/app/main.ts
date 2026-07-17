@@ -72,6 +72,7 @@ async function captureScreenshot(target: string): Promise<void> {
 
 function registerIpc(): void {
   ipcMain.handle(CHANNELS.providerStatus, async () => await utility.request("provider_status"));
+  ipcMain.handle(CHANNELS.probeClaudeUsage, async () => await utility.request("probe_claude_usage"));
   ipcMain.handle(CHANNELS.pickRepository, async () => {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, {

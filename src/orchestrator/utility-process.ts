@@ -14,6 +14,7 @@ import { inspectRepository } from "../repository/preflight.js";
 import { TrustedGit, captureGitSnapshot } from "../repository/git.js";
 import { sha256 } from "../security/redaction.js";
 import { normalizeClaudeAuthentication, normalizeCodexAuthentication } from "../providers/auth.js";
+import { probeClaudeUsage, readCodexUsage } from "../providers/usage.js";
 
 const StartWorkItemPayload = z.object({
   repository: z.string().min(1),
@@ -140,8 +141,20 @@ async function main(): Promise<void> {
       });
     }
     if (method === "provider_status") {
-      const [codex, claude] = await Promise.all([providerStatus("codex"), providerStatus("claude")]);
-      return { codex, claude };
+      const [codex, claude, codexUsage] = await Promise.all([providerStatus("codex"), providerStatus("claude"), readCodexUsage()]);
+      const storedCodexUsage = database.getSetting("usage:codex");
+      return {
+        codex: { ...codex, usage: codexUsage ?? storedCodexUsage ?? null },
+        claude: { ...claude, usage: database.getSetting("usage:claude") ?? null }
+      };
+    }
+    if (method === "probe_claude_usage") {
+      const executable = await runnableExecutable(["claude", "claude.exe", "claude.cmd"]);
+      if (!executable) throw new Error("PROVIDER_UNAVAILABLE: claude is not runnable on PATH");
+      const usage = await probeClaudeUsage(executable);
+      if (!usage) throw new Error("USAGE_PROBE_FAILED: no rate_limit_event observed");
+      database.setSetting("usage:claude", usage);
+      return { usage };
     }
     if (method === "preflight_repository") {
       const repository = payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).repository === "string"

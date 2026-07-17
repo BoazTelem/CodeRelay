@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { PreflightSummary, ProviderStatusEntry, WorkItemDetail, WorkItemRow } from "./global.js";
+import type { PreflightSummary, ProviderStatusEntry, ProviderUsage, WorkItemDetail, WorkItemRow } from "./global.js";
 
 type ProviderPair = { codex: ProviderStatusEntry; claude: ProviderStatusEntry };
 
@@ -24,6 +24,75 @@ function authBadge(entry: ProviderStatusEntry | undefined): { label: string; kin
 function timeOf(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString();
+}
+
+function epochLabel(seconds: number): string {
+  const date = new Date(seconds * 1_000);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? time : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+function usedBarClass(percent: number): string {
+  if (percent >= 90) return "bad";
+  if (percent >= 70) return "warn";
+  return "good";
+}
+
+function UsageLines({ usage, onProbe, probing }: { usage: ProviderUsage | null | undefined; onProbe?: () => void; probing?: boolean }): JSX.Element {
+  if (!usage) {
+    return (
+      <div className="usage-block">
+        <span className="usage-note">No usage data yet</span>
+        {onProbe && (
+          <button className="linkish" onClick={onProbe} disabled={probing} title="Runs one minimal Claude request to read the current limit status">
+            {probing ? "checking…" : "check now"}
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="usage-block">
+      {usage.windows.map((window) => (
+        <div className="usage-line" key={window.label} title={window.resetsAt ? `Resets ${epochLabel(window.resetsAt)}` : undefined}>
+          <span className="usage-label">{window.label}</span>
+          <span className="usage-bar"><span className={`usage-fill ${usedBarClass(window.usedPercent)}`} style={{ width: `${Math.min(100, window.usedPercent)}%` }} /></span>
+          <span className="usage-percent">{Math.round(window.usedPercent)}%</span>
+        </div>
+      ))}
+      {usage.windows.length === 0 && (
+        <div className="usage-line">
+          <span className="usage-label">{usage.limitType === "five_hour" ? "5h" : usage.limitType === "seven_day" ? "weekly" : (usage.limitType ?? "limits")}</span>
+          <span className={`badge ${usage.status === "allowed" && !usage.isUsingOverage ? "good" : usage.status === "allowed" ? "warn" : "bad"}`}>
+            {usage.status === "allowed" ? (usage.isUsingOverage ? "using overage" : "OK") : (usage.status ?? "unknown")}
+          </span>
+          {usage.resetsAt !== undefined && <span className="usage-note">resets {epochLabel(usage.resetsAt)}</span>}
+        </div>
+      )}
+      <div className="usage-meta">
+        {usage.planType && <span>{usage.planType} plan</span>}
+        {usage.creditsBalance && <span>${Number(usage.creditsBalance).toFixed(2)} credits</span>}
+        <span>as of {timeOf(usage.capturedAt)}</span>
+        {onProbe && (
+          <button className="linkish" onClick={onProbe} disabled={probing} title="Runs one minimal Claude request to refresh the limit status">
+            {probing ? "checking…" : "refresh"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function usageHint(entry: ProviderStatusEntry | undefined): string {
+  const usage = entry?.usage;
+  if (!usage) return "";
+  if (usage.windows.length > 0) {
+    return usage.windows.map((window) => `${window.label} ${Math.round(window.usedPercent)}% used`).join(" · ");
+  }
+  if (usage.status === "allowed") return usage.isUsingOverage ? "within limits (overage)" : "within limits";
+  return usage.status ? `limit: ${usage.status}` : "";
 }
 
 function describeEvent(payload: unknown): string {
@@ -78,6 +147,7 @@ export function App(): JSX.Element {
   const [detail, setDetail] = useState<WorkItemDetail>();
   const [actionError, setActionError] = useState("");
   const [intervention, setIntervention] = useState("");
+  const [probingClaude, setProbingClaude] = useState(false);
   const eventsEnd = useRef<HTMLDivElement>(null);
 
   const refreshProviders = useCallback(() => {
@@ -122,6 +192,16 @@ export function App(): JSX.Element {
   useEffect(() => {
     eventsEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.events.length]);
+
+  const probeClaude = (): void => {
+    setProbingClaude(true);
+    window.coderelay.probeClaudeUsage()
+      .then((result) => {
+        setProviders((current) => current ? { ...current, claude: { ...current.claude, usage: result.usage } } : current);
+      })
+      .catch(() => undefined)
+      .finally(() => setProbingClaude(false));
+  };
 
   const chooseRepository = async (): Promise<void> => {
     const picked = await window.coderelay.pickRepository();
@@ -212,10 +292,18 @@ export function App(): JSX.Element {
             const entry = providers?.[name];
             const badge = providersBusy && !providers ? { label: "checking…", kind: "dim" } : authBadge(entry);
             return (
-              <div className="provider-row" key={name}>
-                <span className="name">{name === "codex" ? "Codex" : "Claude"}</span>
-                <span className="version">{entry?.version ?? ""}</span>
-                <span className={`badge ${badge.kind}`}>{badge.label}</span>
+              <div key={name}>
+                <div className="provider-row">
+                  <span className="name">{name === "codex" ? "Codex" : "Claude"}</span>
+                  <span className="version">{entry?.version ?? ""}</span>
+                  <span className={`badge ${badge.kind}`}>{badge.label}</span>
+                </div>
+                {entry?.available && (
+                  <UsageLines
+                    usage={entry.usage}
+                    {...(name === "claude" ? { onProbe: probeClaude, probing: probingClaude } : {})}
+                  />
+                )}
               </div>
             );
           })}
@@ -323,12 +411,15 @@ export function App(): JSX.Element {
                   <button className={`choice ${worker === "codex" ? "selected" : ""}`} onClick={() => setWorker("codex")}>
                     <div className="choice-title">Codex implements</div>
                     <div className="choice-sub">Claude reviews independently</div>
+                    {usageHint(providers?.codex) && <div className="choice-usage">Codex usage: {usageHint(providers?.codex)}</div>}
                   </button>
                   <button className={`choice ${worker === "claude" ? "selected" : ""}`} onClick={() => setWorker("claude")}>
                     <div className="choice-title">Claude implements</div>
                     <div className="choice-sub">Codex reviews independently</div>
+                    {usageHint(providers?.claude) && <div className="choice-usage">Claude usage: {usageHint(providers?.claude)}</div>}
                   </button>
                 </div>
+                <p className="footer-note">The implementer consumes considerably more quota than the auditor — pick the provider with more headroom to implement.</p>
               </div>
               {startError && <div className="alert bad">{startError}</div>}
               <button className="primary" disabled={!canStart} onClick={() => { void start(); }}>

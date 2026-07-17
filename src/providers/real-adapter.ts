@@ -18,6 +18,7 @@ import { terminateProcessTree } from "../security/command-policy.js";
 import { ProviderUnavailableError } from "./stub-adapter.js";
 import type { ProcessObserver } from "./stub-adapter.js";
 import { STAGE_PROMPTS } from "../orchestrator/prompts.js";
+import { usageFromEvents, type ProviderUsage } from "./usage.js";
 
 export interface RealProviderAdapterOptions {
   provider: "codex" | "claude";
@@ -26,6 +27,7 @@ export interface RealProviderAdapterOptions {
   artifactDirectory: string;
   mcpServer?: { command: string; args: string[] };
   processObserver?: ProcessObserver;
+  usageObserver?: (usage: ProviderUsage) => void;
 }
 
 interface ProcessOutput {
@@ -257,6 +259,10 @@ export class RealProviderAdapter implements ProviderAdapter {
     const events = captured.stdout.split(/\r?\n/).filter(Boolean).map((line) => {
       try { return JSON.parse(line) as Record<string, unknown>; } catch { return { type: "unparsed" }; }
     });
+    if (this.options.usageObserver) {
+      const usage = usageFromEvents(this.options.provider, events);
+      if (usage) this.options.usageObserver(usage);
+    }
     const summary = summarizeEvents(events);
     let output: unknown;
     let nativeSessionId = summary.sessionId;

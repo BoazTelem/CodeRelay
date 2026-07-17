@@ -192,20 +192,25 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     }),
     stopped: (processRecord: { id: string; state: "exited" | "cancelled" | "terminated" }) => options.database.stopRecordedProcess(processRecord.id, processRecord.state)
   };
+  const usageObserver = (usage: { provider: string }): void => {
+    options.database.setSetting(`usage:${usage.provider}`, usage);
+  };
   const workerAdapter = new RealProviderAdapter({
     provider: options.worker,
     executable: options.executables[options.worker],
     environment: safe.values,
     artifactDirectory: path.join(options.artifactsDirectory, workItemId, "worker"),
     mcpServer: { command: server.command, args: [...server.args, "--config", brokerPath, "--nonce", nonce] },
-    processObserver
+    processObserver,
+    usageObserver
   });
   const auditorAdapter = new RealProviderAdapter({
     provider: auditor,
     executable: options.executables[auditor],
     environment: safe.values,
     artifactDirectory: path.join(options.artifactsDirectory, workItemId, "auditor"),
-    processObserver
+    processObserver,
+    usageObserver
   });
   for (const adapter of [workerAdapter, auditorAdapter]) {
     const authentication = await adapter.authenticate();
