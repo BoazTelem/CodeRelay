@@ -76,6 +76,7 @@ async function main(): Promise<void> {
     if (process.platform !== "win32") throw new Error("Milestone 2 is the Windows technical proof and must run on Windows");
     const runDirectory = path.join(directory, `milestone-2-${new Date().toISOString().replace(/[:.]/g, "-")}`);
     await mkdir(runDirectory, { recursive: true });
+    await writeFile(path.join(runDirectory, "milestone-0-gate-report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
     const git = await executable(["git", "git.exe"]);
     const codex = await executable(["codex", "codex.exe"]);
     const claude = await executable(["claude", "claude.exe", "claude.cmd"]);
@@ -104,6 +105,7 @@ async function main(): Promise<void> {
         capturedAt: new Date().toISOString(),
         platform: `${process.platform}-${process.arch}`,
         milestoneZeroReportHash: sha256(JSON.stringify(report)),
+        milestoneZeroReportFile: "milestone-0-gate-report.json",
         providers: report.providers.map((provider) => ({
           provider: provider.provider,
           version: provider.executable.version,

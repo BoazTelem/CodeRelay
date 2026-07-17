@@ -353,7 +353,7 @@ export async function createStubFixture(gitExecutable: string, parent?: string):
   const worktrees = path.join(base, "worktrees");
   await mkdir(path.join(root, "src"), { recursive: true });
   await writeFile(path.join(root, "src", "README.txt"), "CodeRelay Milestone 1 fixture\n", "utf8");
-  await writeFile(path.join(root, "validate.mjs"), `import { readFile } from "node:fs/promises";\nconst value = await readFile(new URL("./src/result.txt", import.meta.url), "utf8");\nif (!value.startsWith("implemented")) process.exit(1);\n`, "utf8");
+  await writeFile(path.join(root, "validate.mjs"), `import { readFile } from "node:fs/promises";\nconst value = await readFile(new URL("./src/result.txt", import.meta.url), "utf8");\nif (!value.startsWith("implemented")) {\n  console.error("VALIDATION FAIL: src/result.txt does not start with \\"implemented\\"");\n  process.exit(1);\n}\nconsole.log("VALIDATION PASS: src/result.txt starts with \\"implemented\\"");\n`, "utf8");
   for (const args of [
     ["init", "-b", "main"],
     ["config", "user.name", "CodeRelay Orchestrator"],

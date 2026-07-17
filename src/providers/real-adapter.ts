@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -52,6 +53,16 @@ export function buildProviderJsonSchema(schema: z.ZodTypeAny): Record<string, un
   return converted;
 }
 
+const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\/)/;
+
+export function redactLaunchValue(value: string): string {
+  return ABSOLUTE_PATH.test(value) ? sha256(value) : value;
+}
+
+export function redactLaunchArgs(args: readonly string[]): string[] {
+  return args.map((arg, index) => index > 0 && args[index - 1] === "--nonce" ? "[REDACTED_NONCE]" : redactLaunchValue(arg));
+}
+
 function redactDiagnosticText(value: string): string {
   return redactText(value)
     .replace(/\b[A-Za-z]:[\\/][^\s"'`]+/g, "[REDACTED_PATH]")
@@ -93,8 +104,14 @@ export function summarizeProviderFailure(output: Pick<ProcessOutput, "stdout" | 
 export class RealProviderAdapter implements ProviderAdapter {
   readonly provider: ProviderName;
   private child: ChildProcess | undefined;
+  private runtimePath: string | undefined;
 
   constructor(private readonly options: RealProviderAdapterOptions) { this.provider = options.provider; }
+
+  private async runtimeDirectory(): Promise<string> {
+    this.runtimePath ??= await mkdtemp(path.join(os.tmpdir(), "coderelay-runtime-"));
+    return this.runtimePath;
+  }
 
   async authenticate(): Promise<AuthenticationProof> {
     const result = await runCaptured(
@@ -204,11 +221,15 @@ export class RealProviderAdapter implements ProviderAdapter {
       executable = invocation.executable;
       args = invocation.args;
     } else {
-      const mcpPath = path.join(this.options.artifactDirectory, `${turnId}.mcp.json`);
+      const mcpPath = path.join(await this.runtimeDirectory(), `${turnId}.mcp.json`);
       const mcpServers = this.options.mcpServer
         ? { coderelay: { command: this.options.mcpServer.command, args: this.options.mcpServer.args } }
         : {};
       await writeFile(mcpPath, JSON.stringify({ mcpServers }), "utf8");
+      const redactedServers = this.options.mcpServer
+        ? { coderelay: { command: redactLaunchValue(this.options.mcpServer.command), args: redactLaunchArgs(this.options.mcpServer.args) } }
+        : {};
+      await writeFile(path.join(this.options.artifactDirectory, `${turnId}.mcp.json`), `${JSON.stringify({ mcpServers: redactedServers })}\n`, "utf8");
       const resume = session && session.mode !== "new"
         ? session.mode === "latest" ? { mode: "latest" as const } : { mode: "id-or-name" as const, value: session.value }
         : undefined;

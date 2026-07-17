@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -45,6 +45,13 @@ export interface RealHandoffEvidence {
   primaryCheckoutUntouched: boolean;
   brokerOnly: boolean;
   prohibitedExternalActions: "none";
+}
+
+function providerView<T extends { validationCommands: { executable: string; args: string[]; cwd: string }[] }>(value: T): T {
+  return {
+    ...value,
+    validationCommands: value.validationCommands.map((command) => ({ ...command, executable: path.basename(command.executable) }))
+  };
 }
 
 function changedPaths(status: string, untracked: readonly string[]): string[] {
@@ -117,7 +124,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
   ])];
   const safe = buildSafeEnvironment({ restrictedPath, tempDirectory: os.tmpdir(), homeDirectory: os.homedir() });
   const nonce = `${randomUUID()}-${randomUUID()}`;
-  const brokerPath = path.join(options.artifactsDirectory, `${workItemId}.broker.json`);
+  const brokerPath = path.join(await mkdtemp(path.join(os.tmpdir(), "coderelay-runtime-")), `${workItemId}.broker.json`);
   const broker = BrokerConfig.parse({
     schemaVersion: SCHEMA_VERSION, workItemId, capabilityNonceHash: sha256(nonce),
     expiresAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString(), root: worktree,
@@ -125,6 +132,14 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     commandRules: [], restrictedPath, tempDirectory: os.tmpdir(), homeDirectory: os.homedir()
   });
   await writeFile(brokerPath, `${JSON.stringify(broker)}\n`, "utf8");
+  const redactedBroker = {
+    ...broker,
+    root: sha256(broker.root),
+    restrictedPath: broker.restrictedPath.map((entry) => sha256(entry)),
+    tempDirectory: broker.tempDirectory === undefined ? undefined : sha256(broker.tempDirectory),
+    homeDirectory: broker.homeDirectory === undefined ? undefined : sha256(broker.homeDirectory)
+  };
+  await writeFile(path.join(options.artifactsDirectory, `${workItemId}.broker.json`), `${JSON.stringify(redactedBroker)}\n`, "utf8");
   const server = builtMcpServerLaunch();
   const processObserver = {
     started: (processRecord: { id: string; pid: number; executable: string; startedAt: string }) => options.database.recordProcess({
@@ -172,7 +187,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     const worker = await workerAdapter.runTurn({
       workItemId,
       purpose: "IMPLEMENTATION",
-      prompt: `${iteration === 1 ? STAGE_PROMPTS.IMPLEMENTATION : STAGE_PROMPTS.REWORK}\n\nTaskContract:\n${JSON.stringify(contract)}\n\nApprovedPlan:\n${JSON.stringify(approvedPlan)}\n\nOpen findings:\n${JSON.stringify(findings)}\n\nDo not run validation yourself. The orchestrator is the only validation authority and will attach complete results to the Auditor handoff.`,
+      prompt: `${iteration === 1 ? STAGE_PROMPTS.IMPLEMENTATION : STAGE_PROMPTS.REWORK}\n\nTaskContract:\n${JSON.stringify(providerView(contract))}\n\nApprovedPlan:\n${JSON.stringify(providerView(approvedPlan))}\n\nOpen findings:\n${JSON.stringify(findings)}\n\nDo not run validation yourself. The orchestrator is the only validation authority and will attach complete results to the Auditor handoff.`,
       outputSchema: WorkerResult,
       schemaName: "WorkerResult",
       access: "workspace-write",
@@ -256,7 +271,7 @@ export async function runRealHandoff(options: RealHandoffOptions): Promise<RealH
     const audit = await auditorAdapter.runTurn({
       workItemId,
       purpose: "REVIEW",
-      prompt: `${STAGE_PROMPTS.REVIEW}\n\nTaskContract:\n${JSON.stringify(contract)}\n\nApprovedPlan:\n${JSON.stringify(approvedPlan)}\n\nPlanAudit:\n${JSON.stringify(approvedPlanAudit)}\n\nRepositoryRules:\n${JSON.stringify(repositoryRules)}\n\nFileManifest:\n${JSON.stringify(fileManifest)}\n\nGitEvidence:\n${JSON.stringify(gitEvidence)}\n\nOrchestratorValidationResults (sole validation authority):\n${JSON.stringify(validations)}\n\nHandoff:\n${JSON.stringify(packet)}\n\nFull diff:\n${diff}`,
+      prompt: `${STAGE_PROMPTS.REVIEW}\n\nTaskContract:\n${JSON.stringify(providerView(contract))}\n\nApprovedPlan:\n${JSON.stringify(providerView(approvedPlan))}\n\nPlanAudit:\n${JSON.stringify(approvedPlanAudit)}\n\nRepositoryRules:\n${JSON.stringify(repositoryRules)}\n\nFileManifest:\n${JSON.stringify(fileManifest)}\n\nGitEvidence:\n${JSON.stringify(gitEvidence)}\n\nOrchestratorValidationResults (sole validation authority):\n${JSON.stringify(validations)}\n\nHandoff:\n${JSON.stringify(packet)}\n\nFull diff:\n${diff}`,
       outputSchema: AuditResult,
       schemaName: "AuditResult",
       access: "read-only",
