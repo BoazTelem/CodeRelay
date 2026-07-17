@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { UtilityProcessClient } from "./utility-client.js";
 import { CHANNELS, InterveneArgs, PreflightArgs, StartWorkItemArgs, WorkItemArgs } from "./ipc-contract.js";
@@ -7,6 +8,13 @@ import { CHANNELS, InterveneArgs, PreflightArgs, StartWorkItemArgs, WorkItemArgs
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(moduleDirectory, "..", "..");
 const projectRoot = path.resolve(distRoot, "..");
+
+function argumentValue(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+const screenshotTarget = argumentValue("--screenshot");
 
 let window: BrowserWindow | undefined;
 const utility = new UtilityProcessClient({
@@ -33,6 +41,33 @@ function createWindow(): void {
   window.removeMenu();
   void window.loadFile(path.join(projectRoot, "dist", "app", "renderer", "index.html"));
   window.on("closed", () => { window = undefined; });
+  if (screenshotTarget) {
+    window.webContents.once("did-finish-load", () => { void captureScreenshot(screenshotTarget); });
+  }
+}
+
+async function captureScreenshot(target: string): Promise<void> {
+  try {
+    // Wait for the async provider status probe to paint before capturing.
+    const deadline = Date.now() + 30_000;
+    while (window && Date.now() < deadline) {
+      const settled = await window.webContents.executeJavaScript(
+        "Array.from(document.querySelectorAll('.provider-row .badge')).length >= 2 && !document.body.textContent.includes('checking')"
+      ) as boolean;
+      if (settled) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    if (!window) return;
+    const image = await window.webContents.capturePage();
+    await writeFile(target, image.toPNG());
+    console.log(`screenshot written: ${target}`);
+  } catch (error) {
+    console.error(`screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  } finally {
+    app.quit();
+  }
 }
 
 function registerIpc(): void {
