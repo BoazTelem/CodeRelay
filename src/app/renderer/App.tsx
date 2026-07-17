@@ -308,7 +308,9 @@ export function App(): JSX.Element {
   const bothVerified = providers && providers.codex.authState === "SUBSCRIPTION_VERIFIED" && providers.claude.authState === "SUBSCRIPTION_VERIFIED";
 
   return (
-    <div className="layout">
+    <>
+      <div className="titlebar">CodeRelay</div>
+      <div className="layout">
       <aside className="sidebar" style={{ width: sidebarWidth, minWidth: sidebarWidth }}>
         <div className="brand">
           <h1>Code<span>Relay</span></h1>
@@ -563,6 +565,7 @@ export function App(): JSX.Element {
           </>
         )}
       </main>
-    </div>
+      </div>
+    </>
   );
 }

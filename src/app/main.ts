@@ -31,6 +31,12 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: "#101418",
     title: "CodeRelay",
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#0b0e12",
+      symbolColor: "#93a1b0",
+      height: 34
+    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
