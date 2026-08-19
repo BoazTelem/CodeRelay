@@ -59,16 +59,16 @@
     "zod-to-json-schema": "^3.24.6"
   },
   "devDependencies": {
-    "@cyclonedx/cyclonedx-npm": "^6.0.0",
-    "@types/node": "^26.1.2",
+    "@cyclonedx/cyclonedx-npm": "^6.0.1",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "electron": "^43.2.0",
+    "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tsx": "^4.20.3",
+    "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
